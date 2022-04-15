@@ -43,13 +43,13 @@ bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
         return false;
     }
 
-    EROS_vis.init(w, h, 7, 0.1);
+    EROS_vis.init(w, h, 21, 0.5);
 //    EROS_vis.init(w, h, 5, 0.3);
 
     yarp::os::Network::connect("/atis3/AE:o", getName("/AE:i"), "fast_tcp");
 
     cv::Mat temp = EROS_vis.getSurface();
-    eros_thread.initialise(temp, 19, cv::Rect(60, 150, 500, 80), 3000, &m2, n_trial, n_exp);
+    eros_thread.initialise(temp, 33, 31, cv::Rect(200, 120, 200, 80), 3000, &m2, n_trial, n_exp);
     eros_thread.start();
 
 //    pause = false;
@@ -57,12 +57,12 @@ bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
 //    cv::namedWindow("RESULT", cv::WINDOW_AUTOSIZE);
 //    cv::moveWindow("RESULT", 300,300);
 //
-//    cv::namedWindow("DETECT_MAP", cv::WINDOW_NORMAL);
-//    cv::moveWindow("DETECT_MAP", 500,500);
-//
-//    cv::namedWindow("DETECT_HEAT_MAP", cv::WINDOW_NORMAL);
-//    cv::moveWindow("DETECT_HEAT_MAP", 500,500);
-//
+    cv::namedWindow("DETECT_MAP", cv::WINDOW_NORMAL);
+    cv::moveWindow("DETECT_MAP", 500,500);
+
+    cv::namedWindow("DETECT_HEAT_MAP", cv::WINDOW_NORMAL);
+    cv::moveWindow("DETECT_HEAT_MAP", 500,500);
+
     cv::namedWindow("ROI TRACK", cv::WINDOW_NORMAL);
     cv::moveWindow("ROI TRACK", 600,600);
 
@@ -72,8 +72,8 @@ bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
     cv::namedWindow("GAUSSIAN MUL", cv::WINDOW_NORMAL);
     cv::moveWindow("GAUSSIAN MUL", 600,1200);
 
-    cv::namedWindow("FINAL TRACK", cv::WINDOW_AUTOSIZE);
-    cv::moveWindow("FINAL TRACK", 0,0);
+    // cv::namedWindow("FINAL TRACK", cv::WINDOW_AUTOSIZE);
+    // cv::moveWindow("FINAL TRACK", 0,0);
 
 //    cv::namedWindow("GAUSSIAN MUL", cv::WINDOW_NORMAL);
 //    cv::moveWindow("GAUSSIAN MUL", 1400,1400);
@@ -81,8 +81,8 @@ bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
 //    cv::namedWindow("ell_filter", cv::WINDOW_NORMAL);
 //    cv::moveWindow("ell_filter", 320,320);
 
-//    cv::namedWindow("init filter", cv::WINDOW_NORMAL);
-//    cv::moveWindow("init filter", 320,320);
+   cv::namedWindow("init filter", cv::WINDOW_NORMAL);
+   cv::moveWindow("init filter", 320,320);
 
     yarp::os::Network::connect(getName("/image:o"), "/puckView", "fast_tcp");
 
@@ -91,28 +91,40 @@ bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
 
 void puckPosModule::run() {
 
-    double time_offset = -1.0;
-    ev::info read_stats = input_port.readChunkN(1);
-    if(input_port.isStopping()) return;
-    time_offset = input_port.begin().packetTime();
-    eros_thread.setFirstTime(time_offset);
+    // double time_offset = -1.0;
+    // ev::info read_stats = input_port.readChunkN(1);
+    // if(input_port.isStopping()) return;
+    // time_offset = input_port.begin().packetTime();
+    // eros_thread.setFirstTime(time_offset);
+
+    Stamp ystamp; 
 
     while (Thread::isRunning()) {
 
-        input_port.readChunkN(1);
+        // input_port.readChunkN(1);
+        unsigned int nqs = input_port.queryunprocessed(); 
         if(input_port.isStopping())
             break;
-        for(auto a = input_port.begin(); a != input_port.end(); a++) {
-            EROS_vis.EROSupdate((*a).x, (*a).y);
+        // for(auto a = input_port.begin(); a != input_port.end(); a++) {
+        //     EROS_vis.EROSupdate((*a).x, (*a).y);
 
-            yarp::sig::PixelBgr &ePix = puckMap.pixel((*a).x,(*a).y);
-            ePix.r = ePix.b = ePix.g = 255;
+        //     yarp::sig::PixelBgr &ePix = puckMap.pixel((*a).x,(*a).y);
+        //     ePix.r = ePix.b = ePix.g = 255;
 
-            eros_thread.setCurrentTime(a.packetTime());
+        //     eros_thread.setCurrentTime(a.packetTime());
+        // }
+        // eros_thread.setLatencyTime(input_port.getUnprocessedDelay());
+
+        for(int i=0; i<nqs; i++){
+            const vector<ev::AE> *q = input_port.read(ystamp); 
+            if (!q || Thread::isStopping()) return;
+            for(auto &qi: *q){
+                EROS_vis.EROSupdate((qi).x, (qi).y);
+
+                yarp::sig::PixelBgr &ePix = puckMap.pixel((qi).x,(qi).y);
+                ePix.r = ePix.b = ePix.g = 255;
+            }
         }
-        eros_thread.setLatencyTime(input_port.getUnprocessedDelay());
-
-
 
 //        if (pause)
 //            m.lock();
@@ -185,12 +197,12 @@ void puckPosModule::onStop() {
     input_port.stop();
 }
 
-void asynch_thread::initialise(cv::Mat &eros, int init_filter_width, cv::Rect roi, double thresh, std::mutex *m2, int n_trial, int n_exp)
+void asynch_thread::initialise(cv::Mat &eros, int init_filter_width, int init_filter_height, cv::Rect roi, double thresh, std::mutex *m2, int n_trial, int n_exp)
 {
     this->eros = eros; //shallow copy (i.e. pointer)
     this->m2=m2;
 
-    detector.initialize(init_filter_width, roi, thresh); // create and visualize filter for detection phase
+    detector.initialize(init_filter_width, init_filter_height, roi, thresh); // create and visualize filter for detection phase
     tracker.initKalmanFilter();
 
     file_closed=true;
@@ -285,17 +297,17 @@ void asynch_thread::run() {
             // UPDATE RATE
             double dT = yarp::os::Time::now() - tic;
             tic += dT;
-            double eros_time_before= getCurrentTime();
+            // double eros_time_before= getCurrentTime();
 //            yInfo() << "Running at a cool " << 1.0 / dT << "Hz";
             puck_pos = tracker.track(eros_filtered, dT);
-            double eros_time_after = getCurrentTime();
+            // double eros_time_after = getCurrentTime();
 
-            double eros_diff_time = eros_time_after-eros_time_before;
+            // double eros_diff_time = eros_time_after-eros_time_before;
 //            yInfo()<<latency;
 
 //            yInfo()<<getLatencyTime();
 
-            file<<(getCurrentTime()-getFirstTime())<<" "<<puck_pos.x<<" "<<puck_pos.y<<" "<<getLatencyTime()+eros_diff_time<<" "<<1.0 / dT<<" "<<tracker.get_convROI().width<<" "<<tracker.get_convROI().height<<endl;
+            // file<<(getCurrentTime()-getFirstTime())<<" "<<puck_pos.x<<" "<<puck_pos.y<<" "<<getLatencyTime()+eros_diff_time<<" "<<1.0 / dT<<" "<<tracker.get_convROI().width<<" "<<tracker.get_convROI().height<<endl;
 
 //            if (puck_pos.x<=3){
 //                setStatus(0);
