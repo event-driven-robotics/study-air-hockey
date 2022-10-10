@@ -24,9 +24,11 @@
 #include <yarp/math/Math.h>
 #include <yarp/sig/all.h>
 
-// #include <event-driven/core.h>
-#include <event-driven/all.h>
+#include <event-driven/core.h>
+//#include <event-driven/all.h>
 
+#include <event-driven/algs.h>
+#include <event-driven/vis.h>
 #include <iostream>
 #include <mutex>
 #include <cmath>
@@ -43,7 +45,7 @@
 #include <opencv2/calib3d.hpp>
 #include <opencv2/calib3d/calib3d_c.h>
 
-#include "hpe-core/representations.h"
+//#include "hpe-core/representations.h"
 
 using namespace ev;
 using namespace cv;
@@ -79,23 +81,23 @@ public:
                 double dx = (pow(x,2) -2*origin.x*x + pow(origin.x,2))/pow((width)/2,2);
                 double dy = (pow(y,2) -2*origin.y*y + pow(origin.y,2))/pow((height)/2,2);
                 double value = dx+ dy;
-                if(value > 0.8)
+                if(value > 0.9)
                     ell_filter.at<float>(y, x) = -0.5;
-                else if (value > 0.4 && value<=0.8)
+                else if (value > 0.6 && value<=0.9)
                     ell_filter.at<float>(y, x) = 3;
                 else
-                    ell_filter.at<float>(y, x) = -0.5;
+                    ell_filter.at<float>(y, x) = -1;
 
             }
         }
 
-        for(int x=0; x< ell_filter.cols; x++) {
-            for(int y=0; y< ell_filter.rows; y++) {
-                if(x>=17 && x<=23){
-                    ell_filter.at<float>(y,x) = 0;
-                }
-            }
-        }
+        // for(int x=0; x< ell_filter.cols; x++) {
+        //     for(int y=0; y< ell_filter.rows; y++) {
+        //         if(x>=17 && x<=23){
+        //             ell_filter.at<float>(y,x) = 0;
+        //         }
+        //     }
+        // }
 
         return ell_filter;
     }
@@ -173,6 +175,8 @@ public:
 
         max_loc += cv::Point(roi.x, roi.y);
 
+        // yInfo()<<"MAX:"<<max; 
+
         return max>thresh;
     }
 
@@ -242,8 +246,8 @@ private:
 
         result_conv_normalized.convertTo(heat_map, CV_8U);
 
-        Mat g = getGaussianKernel(zoom.height, 0.4* filter.rows, CV_32F) *
-                getGaussianKernel(zoom.width, 0.4* filter.cols, CV_32F).t();
+        Mat g = getGaussianKernel(zoom.height, 0.5* filter.rows, CV_32F) *
+                getGaussianKernel(zoom.width, 0.5* filter.cols, CV_32F).t();
 
         Mat heat_map_zoom = result_conv_normalized(zoom);
         Mat heat_map_filtered = heat_map_zoom.mul(g);
@@ -346,9 +350,9 @@ public:
                 double dx = (pow(x,2) -2*origin.x*x + pow(origin.x,2))/pow((width)/2,2);
                 double dy = (pow(y,2) -2*origin.y*y + pow(origin.y,2))/pow((height)/2,2);
                 double value = dx+ dy;
-                if(value > 0.8)
-                    ell_filter.at<float>(y, x) = -0.5;
-                else if (value > 0.4 && value<=0.8)
+                if(value > 0.9)
+                    ell_filter.at<float>(y, x) = -1;
+                else if (value > 0.6 && value<=0.9)
                     ell_filter.at<float>(y, x) = 3;
                 else
                     ell_filter.at<float>(y, x) = -0.5;
@@ -356,13 +360,13 @@ public:
             }
         }
 
-        for(int x=0; x< ell_filter.cols; x++) {
-            for(int y=0; y< ell_filter.rows; y++) {
-                if(x>=17 && x<=23){
-                    ell_filter.at<float>(y,x) = 0;
-                }
-            }
-        }
+        // for(int x=0; x< ell_filter.cols; x++) {
+        //     for(int y=0; y< ell_filter.rows; y++) {
+        //         if(x>=17 && x<=23){
+        //             ell_filter.at<float>(y,x) = 0;
+        //         }
+        //     }
+        // }
 
         return ell_filter;
     }
@@ -405,12 +409,12 @@ public:
 //        cv::setIdentity(kf.measurementNoiseCov, cv::Scalar(1e-2));
 
         factor = 3;
-        roi_full = cv::Rect(0,0,640,480);
+        roi_full = cv::Rect(0,0,346,260);
 
         // filter_bank_min = 9;
         // filter_bank_max = 51;
         // createFilterBank(filter_bank_min, filter_bank_max);
-        filter_track = createCustom(33,31);
+        filter_track = createCustom(59,53);
 
         first_time = yarp::os::Time::now();
     }
@@ -430,7 +434,7 @@ public:
         if(roi_height%2==0)
             roi_height++;
 
-        cv::Rect roi_full = cv::Rect(0,0,640,480);
+        cv::Rect roi_full = cv::Rect(0,0,346,260);
         roi = cv::Rect(u - roi_width/2, v - roi_height/2, roi_width, roi_height) & roi_full;
 //        yInfo()<<"ROI ="<<roi.x<<" "<<roi.y<<" "<<roi.width<<" "<<roi.height;
     }
@@ -445,7 +449,7 @@ public:
         this->puck_size=puck_size;
         this->starting_position=starting_position;
 
-        updateROI(starting_position, 33, 31);
+        updateROI(starting_position, 59, 53);
 
         puck_meas = starting_position;
         roi = cv::Rect(starting_position.x-puck_size/2, starting_position.y-puck_size/2, puck_size*1.2, puck_size);
@@ -563,8 +567,8 @@ public:
         // if(width<9)
         //     width = 9;
 
-        int width = 33;
-        int height = 31; 
+        int width = 59;
+        int height = 53; 
 
         puck_meas = multi_conv(eros, width, height);
 //        cv::Point2d puck_pred = KalmanPrediction(dT);
@@ -631,12 +635,12 @@ private:
     int n_trial, n_exp;
     std::mutex m, m2;
     int w, h;
-    hpecore::surface EROS_vis;
+    ev::EROS EROS_vis;
     double start_time_latency;
     int save,seq;
 
-    // ev::window<ev::AE> input_port;
-    ev::vReadPort<vector<ev::AE>> input_port; 
+    ev::window<ev::AE> input_port;
+    //ev::vReadPort<vector<ev::AE>> input_port; 
     yarp::os::BufferedPort <yarp::sig::ImageOf<yarp::sig::PixelBgr> > image_out;
     yarp::sig::ImageOf<yarp::sig::PixelBgr> puckMap;
 
@@ -647,7 +651,7 @@ protected:
 public:
 
     // constructor
-    puckPosModule(){puckMap.resize(640, 480);}
+    puckPosModule(){puckMap.resize(346, 260);}
 
     //the virtual functions that need to be overloaded
 
@@ -662,4 +666,3 @@ public:
 };
 
 #endif
-//empty line
