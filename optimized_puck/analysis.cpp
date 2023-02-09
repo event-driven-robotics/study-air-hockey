@@ -40,11 +40,12 @@ private:
     } affine_bundle;
 
     std::array<affine_bundle, 7> affine_info;
-    double translation{1}, angle{2}, pscale{1.05}, nscale{0.95};
+    double translation{2}, angle{1}, pscale{1.05}, nscale{0.95};
     std::vector<cv::Mat> affines_vector;
     std::vector<double> scores_vector;
-    cv::Mat initial_template, last_template, new_template;
-    cv::Mat last_position_homogenous, new_position;
+    cv::Mat initial_template, last_template, new_template, rot_template, rot_tr_template;
+    cv::Point2f initial_position;
+    cv::Point2f new_position;
     cv::Rect last_roi, new_roi;
 
     cv::Mat black_image, white_image;
@@ -105,6 +106,33 @@ private:
         affine_info[6].A.at<double>(1,1) = 1;
     }
 
+    cv::Mat updateRotMat(double angle, double scale, cv::Point2f center){
+        
+        // the state is an affine
+        cv::Mat rotMat = cv::Mat::zeros(2,3, CV_64F);
+
+        double alpha = scale*cos(angle);
+        double beta = scale*sin(angle);
+
+        rotMat.at<double>(0,0) = alpha; rotMat.at<double>(0,1) = beta; rotMat.at<double>(0,2) = (1-alpha)*center.x - beta*center.y;
+        rotMat.at<double>(1,0) = -beta; rotMat.at<double>(1,1) = alpha; rotMat.at<double>(1,2) = beta*center.x - (1-alpha)*center.y;
+
+//        yInfo()<<alpha<<beta<<center.x<<center.y;
+
+        return rotMat;
+    }
+
+    cv::Mat updateTrMat(double translation_x, double translation_y){
+
+        // the state is an affine
+        cv::Mat trMat = cv::Mat::zeros(2,3, CV_64F);
+
+        trMat.at<double>(0,0) = 1; trMat.at<double>(0,1) = 0; trMat.at<double>(0,2) = translation_x;
+        trMat.at<double>(1,0) = 0; trMat.at<double>(1,1) = 1; trMat.at<double>(1,2) = translation_y;
+
+        return trMat;
+    }
+
 public:
 
     bool configure(yarp::os::ResourceFinder& rf) override
@@ -143,25 +171,22 @@ public:
         cv::moveWindow("affines", 640,0);
         cv::moveWindow("eros tracked", 740,0);
 
-        last_position_homogenous = cv::Mat::zeros(3,1, CV_64F);
-        last_position_homogenous.at<double>(2,0) = 1;
-
         black_image = cv::Mat::zeros(h, w, CV_8U);
         first_square = cv::Rect(306,263, 87, 93);
-        cv::rectangle(black_image, first_square, cv::Scalar(255),1,8,0); // if you draw a rectangle... is not saved in the matrix numbers
+        cv::rectangle(black_image, first_square, cv::Scalar(255),4,8,0); // if you draw a rectangle... is not saved in the matrix numbers
 
-        last_position_homogenous.at<double>(0,0)=first_square.x+first_square.width/2;
-        last_position_homogenous.at<double>(1,0)=first_square.y+first_square.height/2;
-//        cv::circle(black_image, cv::Point2f(last_position_homogenous.at<double>(0,0), last_position_homogenous.at<double>(1,0)),1,255,1,8,0);
+        initial_position.x = first_square.x + first_square.width/2;
+        initial_position.y = first_square.y + first_square.height/2;
 
         cv::imwrite("/code/air_hockey_event_driven_repo/study-air-hockey/optimized_puck/square_template.jpg", black_image);
 
         square_template_bgr = cv::imread("/code/air_hockey_event_driven_repo/study-air-hockey/optimized_puck/square_template.jpg");
         cv::cvtColor(square_template_bgr, square_template_gray, COLOR_BGR2GRAY);
         square_template_gray.convertTo(square_template, CV_64F);
-        last_template = square_template;
+        initial_template = square_template;
+        last_template = initial_template;
 
-        createAffines(translation, cv::Point2f(last_position_homogenous.at<double>(0,0), last_position_homogenous.at<double>(1,0)), angle, pscale, nscale);
+        createAffines(translation, initial_position, angle, pscale, nscale);
 
         affine_thread = std::thread([this]{fixed_step_loop();});
 
@@ -170,8 +195,10 @@ public:
 
     void fixed_step_loop() {
 
+        double sum_tx{0}, sum_ty{0}, sum_rot{0};
+
         while (!input_port.isStopping()) {
-            ev::info my_info = input_port.readChunkT(0.004, true);
+            ev::info my_info = input_port.readChunkT(0.01, true);
 //            yInfo()<<my_info.count<<my_info.duration<<my_info.timestamp;
             for (auto &v : input_port) {
                 eros.update(v.x, v.y);
@@ -182,121 +209,58 @@ public:
             eros_tracked.convertTo(eros_tracked_64f, CV_64F);
 
             for (int affine = 0; affine < affine_info.size(); affine++) {
+                // warp on independent axes the roto-translated template
                 cv::warpAffine(last_template, affine_info[affine].warped_img, affine_info[affine].A,
                                    affine_info[affine].warped_img.size());
                 affine_info[affine].score = similarity_score(eros_tracked_64f, affine_info[affine].warped_img);
                 scores_vector.push_back(affine_info[affine].score);
-//                cv::circle(affine_info[affine].warped_img, cv::Point(last_position_homogenous.at<double>(0,0), last_position_homogenous.at<double>(1,0)), 2, 255, -1);
-//                cv::imshow("affine"+std::to_string(affine), affine_info[affine].warped_img);
+                cv::imshow("affine"+std::to_string(affine), affine_info[affine].warped_img);
             }
 
             int best_score_index = max_element(scores_vector.begin(), scores_vector.end()) - scores_vector.begin();
             double best_score = *max_element(scores_vector.begin(), scores_vector.end());
 
-//            printMatrix(affine_info[best_score_index].A);
-            new_position = affine_info[best_score_index].A * last_position_homogenous;
-            new_template = affine_info[best_score_index].warped_img;
-
             yInfo() << scores_vector;
             yInfo() << "highest score =" << best_score_index << best_score;
-            yInfo() << "old position = (" << last_position_homogenous.at<double>(0, 0)
-                    << last_position_homogenous.at<double>(1, 0) << "), new position = ("
-                    << new_position.at<double>(0, 0) << new_position.at<double>(1, 0) << ")";
 
-//            cv::Rect intersection_roi = cv::Rect(new_position.at<double>(0,0)-last_position_homogenous.cols/2, new_position.at<double>(1,0)-last_position_homogenous.rows/2, last_position_homogenous.cols, last_position_homogenous.rows) & roi_full;
-//
-//            last_template(intersection_roi).copyTo(black_image(intersection_roi));
-            last_template = new_template;
-            last_position_homogenous.at<double>(0, 0) = new_position.at<double>(0, 0);
-            last_position_homogenous.at<double>(1, 0) = new_position.at<double>(1, 0);
+            //update the state
+            if (best_score_index == 0)
+                sum_tx += translation;
+            else if (best_score_index == 1)
+                sum_tx -= translation;
+            else if (best_score_index == 2)
+                sum_ty += translation;
+            else if (best_score_index == 3)
+                sum_ty -= translation;
+            else if (best_score_index == 4)
+                sum_rot += angle;
+            else if (best_score_index == 5)
+                sum_rot -= angle;
 
-//            createAffines(translation, cv::Point2f(new_position.at<double>(0,0), new_position.at<double>(1,0)), angle, pscale, nscale);
+            yInfo()<<"Sum ="<<sum_tx<<sum_ty<<sum_rot;
+
+            //warp the initial template by the affine state only to rotate
+//            cv::Mat rotMat = updateRotMat(sum_rot, 1, cv::Point2f(0,0));
+            cv::Mat rotMatfunc = getRotationMatrix2D(initial_position, sum_rot, 1);
+            cv::warpAffine(initial_template, rot_template, rotMatfunc, rot_template.size());
+//            printMatrix(rotMat);
+//            printMatrix(rotMatfunc);
+            imshow("initial rotated template", rot_template);
+            cv::Mat trMat =  updateTrMat(sum_tx, sum_ty);
+            cv::warpAffine(rot_template, rot_tr_template, trMat, rot_tr_template.size());
+//            printMatrix(trMat);
+            imshow("initial rotated and translated template", rot_tr_template);
+
+            new_position = cv::Point2f(initial_position.x+sum_tx,initial_position.y+sum_ty);
+            yInfo() << "new position = ("<<new_position.x<<new_position.y<<")";
+            last_template = rot_tr_template;
 
             scores_vector.clear();
 
-//            if (!tracking_bool) {
-//                if (detector.detect(eros_filtered)) { //if the maximum of the convolution is greater than a threshold
-//
-//                    tracking_bool = true;
-//                    eros_filtered.copyTo(eros_detected);
-//                    detection_roi = cv::Rect(detector.max_loc.x - detection_roi.width / 2,
-//                                             detector.max_loc.y - detection_roi.height / 2, detection_roi.width,
-//                                             detection_roi.height);
-//                    eros_detected_roi = eros_detected(detection_roi);
-//
-//                    last_template = eros_detected_roi;
-//                    new_template = last_template;
-//                    last_roi = detection_roi;
-//
-//                    last_position_homogenous.at<double>(0, 0) = detector.max_loc.x - last_roi.x;
-//                    last_position_homogenous.at<double>(1, 0) = detector.max_loc.y - last_roi.y;
-//
-//                    yInfo() << "detected puck position = (" << detector.max_loc.x << detector.max_loc.y << ")";
-//                }
-//            } else {
-//                eros_filtered.copyTo(eros_tracked);
-//                eros_tracked_roi = eros_tracked(last_roi);
-//                cv::imshow("eros tracked", eros_tracked_roi);
-//
-//                cv::Mat h_prev, h_curr, h_new;
-//                for (int affine = 0; affine < affine_info.size(); affine++) {
-//                    if (affine < 4)
-//                        cv::warpAffine(last_template, affine_info[affine].warped_img, affine_info[affine].A,
-//                                       affine_info[affine].warped_img.size());
-//                    else
-//                        cv::warpAffine(new_template, affine_info[affine].warped_img, affine_info[affine].A,
-//                                       affine_info[affine].warped_img.size());
-//
-//                    cv::Rect intersection_roi = last_roi & roi_full;
-//                    cv::Rect centered_roi(black_image.cols/2-detection_roi.width/2, black_image.rows/2-detection_roi.height/2, detection_roi.width, detection_roi.height);
-//                    cv::Rect centered_roi_intersection(black_image.cols/2-intersection_roi.width/2, black_image.rows/2-intersection_roi.height/2, intersection_roi.width, intersection_roi.height);
-//                    affine_info[affine].warped_img.copyTo(black_image(centered_roi));
-//                    cv::Mat new_image = black_image(centered_roi_intersection);
-//
-//                    affine_info[affine].score = similarity_score(eros_tracked_roi, new_image);
-//                    scores_vector.push_back(affine_info[affine].score);
-//                    if (affine==0)
-//                        h_prev = affine_info[affine].warped_img;
-//                    else if (affine == 1)
-//                        h_curr = affine_info[affine].warped_img;
-//                    else{
-//                        h_curr = affine_info[affine].warped_img;
-//                        cv::vconcat(h_prev, h_curr, h_new);
-//                        h_prev = h_new;
-//                    }
-//                }
-//
-//                cv::imshow("affines", h_new);
-//
-//                new_position = affine_info[max_element(scores_vector.begin(), scores_vector.end()) - scores_vector.begin()].A * last_position_homogenous;
-//                new_roi = cv::Rect(new_position.at<double>(0, 0) + last_roi.x - detection_roi.width / 2,
-//                                   new_position.at<double>(1, 0) + last_roi.y - detection_roi.height / 2,
-//                                   detection_roi.width, detection_roi.height) & roi_full;
-//                new_template = affine_info[max_element(scores_vector.begin(), scores_vector.end()) -
-//                                           scores_vector.begin()].warped_img;
-//
-//                yInfo() << scores_vector;
-//                yInfo() << "highest score =" << *max_element(scores_vector.begin(), scores_vector.end())
-//                        << max_element(scores_vector.begin(), scores_vector.end()) - scores_vector.begin();
-//                yInfo() << "old position = (" << last_position_homogenous.at<double>(0, 0)
-//                        << last_position_homogenous.at<double>(1, 0) << "), new position = ("
-//                        << new_position.at<double>(0, 0) << new_position.at<double>(1, 0) << ")";
-//
-//                last_position_homogenous.at<double>(0, 0) = new_position.at<double>(0, 0);
-//                last_position_homogenous.at<double>(1, 0) = new_position.at<double>(1, 0);
-//                last_position_homogenous.at<double>(2, 0) = 1;
-//                last_roi = new_roi;
-//                last_template = new_template;
-//
-//                scores_vector.clear();
-//
-////                cv::ellipse(eros_tracked, cv::Point(new_position.at<double>(0,0)+new_roi.x, new_position.at<double>(1,0)+new_roi.y), Size(init_filter_width/2,init_filter_height/2),0,0,360, 255, 2);
-                imshow("template", last_template);
-                cv::circle(eros_tracked, cv::Point(new_position.at<double>(0,0), new_position.at<double>(1,0)), 2, 255, -1);
-                imshow("tracking", eros_tracked);
-                cv::waitKey(1);
-//
-//            }
+            cv::circle(eros_tracked, new_position, 2, 255, -1);
+            imshow("tracking", eros_tracked);
+            cv::waitKey(0);
+            yInfo()<<" ";
         }
     }
 
