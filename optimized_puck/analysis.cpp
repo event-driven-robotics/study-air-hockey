@@ -39,18 +39,20 @@ private:
     } affine_bundle;
 
     std::array<affine_bundle, 9> affine_info;
-    double translation{3}, angle{1}, pscale{1.01}, nscale{0.99};
+    double translation{2}, angle{0.3}, pscale{1.0001}, nscale{0.9999};
     std::vector<cv::Mat> affines_vector;
     std::vector<double> scores_vector;
     cv::Mat initial_template, last_template, rot_template, rot_tr_template;
-    cv::Point2f initial_position;
-    cv::Point2f new_position;
+    cv::Point initial_position;
+    cv::Point new_position;
 
     cv::Mat black_image;
     cv::Rect square;
     cv::Mat square_template, square_template_bgr, square_template_gray;
     bool first_it{true};
     bool tracking_bool{false};
+    double width_roi, height_roi;
+    cv::Rect roi_around_shape, roi_around_eros;
 
     double similarity_score(const cv::Mat &observation, const cv::Mat &expectation) {
         static cv::Mat muld;
@@ -140,12 +142,14 @@ public:
         // options and parameters
         w = rf.check("w", Value(640)).asInt64();
         h = rf.check("h", Value(480)).asInt64();
-        eros_k = rf.check("eros_k", Value(21)).asInt32();
-        eros_d = rf.check("eros_d", Value(0.1)).asFloat64();
+        eros_k = rf.check("eros_k", Value(17)).asInt32();
+        eros_d = rf.check("eros_d", Value(0.3)).asFloat64();
         period = rf.check("period", Value(0.01)).asFloat64();
         init_filter_width = rf.check("filter_w", Value(73)).asInt64();
         init_filter_height = rf.check("filter_h", Value(55)).asInt64();
         detection_thresh = rf.check("thresh", Value(10000)).asInt64();
+        width_roi = rf.check("w_roi", Value(150)).asFloat64();
+        height_roi = rf.check("h_roi", Value(150)).asFloat64();
 
         // module name
         setName((rf.check("name", Value("/object_position")).asString()).c_str());
@@ -161,11 +165,11 @@ public:
         yarp::os::Network::connect("/atis3/AE:o", "/object_position/AE:i", "fast_tcp");
 
 
-        cv::namedWindow("tracking", cv::WINDOW_AUTOSIZE);
-        cv::resizeWindow("tracking", cv::Size(w,h));
-        cv::moveWindow("tracking", 0,0);
-        cv::moveWindow("affines", 640,0);
-        cv::moveWindow("eros tracked", 740,0);
+//        cv::namedWindow("tracking", cv::WINDOW_AUTOSIZE);
+//        cv::resizeWindow("tracking", cv::Size(w,h));
+//        cv::moveWindow("tracking", 0,0);
+//        cv::moveWindow("affines", 640,0);
+//        cv::moveWindow("eros tracked", 740,0);
 
 
         // CREATE THE B&W TEMPLATE
@@ -186,8 +190,6 @@ public:
 //        initial_position.x = 325;
 //        initial_position.y = 219;
 
-//        first_square = cv::Rect(initial_position.x-50, initial_position.y-50, 100,100);
-
         // DRAW A SQUARE
         square = cv::Rect(306,263, 87, 93);
         cv::rectangle(black_image, square, cv::Scalar(255),4,8,0); // if you draw a rectangle... is not saved in the matrix numbers
@@ -195,8 +197,11 @@ public:
         initial_position.x = square.x + square.width/2;
         initial_position.y = square.y + square.height/2;
 
+        roi_around_shape = cv::Rect2d(initial_position.x-width_roi/2, initial_position.y-height_roi/2, width_roi, height_roi);
+        roi_around_eros = roi_around_shape;
+
         black_image.convertTo(square_template, CV_64F);
-        initial_template = square_template;
+        initial_template = square_template(roi_around_shape);
         last_template = initial_template;
 
         createAffines(translation, initial_position, angle, pscale, nscale);
@@ -215,15 +220,16 @@ public:
         double sum_tx{0}, sum_ty{0}, sum_rot{0}, sum_scale{1};
 
         while (!input_port.isStopping()) {
-            ev::info my_info = input_port.readChunkT(0.01, true);
-            yInfo()<<my_info.count<<my_info.duration<<my_info.timestamp;
+            ev::info my_info = input_port.readChunkT(0.0001, true);
+//            yInfo()<<my_info.count<<my_info.duration<<my_info.timestamp;
             for (auto &v : input_port) {
-                eros.update(v.x, v.y);
+//                if(v.x>roi_around_eros.x && v.x<roi_around_eros.x+roi_around_eros.width && v.y >roi_around_eros.y && v.y<roi_around_eros.y+roi_around_eros.height)
+                    eros.update(v.x, v.y);
 //                eros.update(640-v.x, 480-v.y); //when output from zynqGrabber
             }
 
             cv::GaussianBlur(eros.getSurface(), eros_filtered, cv::Size(5, 5), 0);
-            eros_filtered.copyTo(eros_tracked); //is 0 type CV_8UC1
+            eros_filtered(roi_around_eros).copyTo(eros_tracked); // is 0 type CV_8UC1
             eros_tracked.convertTo(eros_tracked_64f, CV_64F);  // is 6 type CV_64FC1
 
             for (int affine = 0; affine < affine_info.size(); affine++) {
@@ -264,22 +270,42 @@ public:
             //warp the initial template by the affine state only to rotate
 //            cv::Mat rotMat = updateRotMat(sum_rot, 1, cv::Point2f(0,0));
             // rot template obtained by warping for an affine including rotation and scale
-            cv::Mat rotMatfunc = getRotationMatrix2D(initial_position, sum_rot, sum_scale);
+            cv::Mat rotMatfunc = getRotationMatrix2D(cv::Point2d(initial_position.x-roi_around_shape.x, initial_position.y-roi_around_shape.y), sum_rot, sum_scale);
             cv::warpAffine(initial_template, rot_template, rotMatfunc, rot_template.size());
-//            imshow("rotated template", rot_template);
+//            cv::circle(rot_template, cv::Point(initial_position.x-roi_around_shape.x, initial_position.y-roi_around_shape.y),1,255,1,8,0);
+            imshow("template", rot_template);
 
-            cv::Mat trMat =  updateTrMat(sum_tx, sum_ty);
-            cv::warpAffine(rot_template, rot_tr_template, trMat, rot_tr_template.size());
-            imshow("roto-translated template", rot_tr_template);
+//            double initial_n_white_pix = cv::countNonZero(initial_template);
+//            double n_white_pix = cv::countNonZero(rot_template);
+//            yInfo()<<n_white_pix;
+//            double scaled_factor = n_white_pix/initial_n_white_pix;
 
-            new_position = cv::Point2f(initial_position.x+sum_tx,initial_position.y+sum_ty);
+//            if(sum_scale>1 && scaled_factor>1){
+//                cv::Mat scaled_template;
+//                scaled_template = cv::Mat::zeros(rot_template.cols, rot_template.rows, CV_64F);
+//                scaled_template = rot_template/scaled_factor;
+//                printMatrix(scaled_template);
+//                imshow("scaled template", scaled_template);
+//
+//                scaled_template.copyTo(rot_template);
+//            }
+
+//            cv::Mat trMat =  updateTrMat(sum_tx, sum_ty);
+//            cv::warpAffine(rot_template, rot_tr_template, trMat, rot_tr_template.size());
+//            imshow("roto-translated template", rot_tr_template);
+
+            new_position = cv::Point2d(initial_position.x+sum_tx,initial_position.y+sum_ty);
 //            yInfo() << "new position = ("<<new_position.x<<new_position.y<<")";
-            last_template = rot_tr_template;
+            last_template = rot_template;
+            roi_around_eros = cv::Rect2d(new_position.x-width_roi/2, new_position.y-height_roi/2, width_roi, height_roi);
 
             scores_vector.clear();
 
-            cv::circle(eros_tracked, new_position, 2, 255, -1);
-            imshow("tracking", eros_tracked);
+//            cv::circle(eros_tracked, cv::Point2d(initial_position.x-roi_around_shape.x, initial_position.y-roi_around_shape.y), 2, 255, -1);
+            imshow("EROS ROI", eros_tracked);
+            cv::circle(eros_filtered, new_position, 2, 255, -1);
+            cv::rectangle(eros_filtered, roi_around_eros, 255,1,8,0);
+            imshow("EROS", eros_filtered);
             cv::waitKey(1);
 
         }
