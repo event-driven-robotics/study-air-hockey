@@ -39,7 +39,7 @@ private:
     } affine_bundle;
 
     std::array<affine_bundle, 9> affine_info;
-    double translation{2}, angle{0.3}, pscale{1.0001}, nscale{0.9999};
+    double translation{2}, angle{0.25}, pscale{1.02}, nscale{0.98};
     std::vector<cv::Mat> affines_vector;
     std::vector<double> scores_vector;
     cv::Mat initial_template, last_template, rot_template, rot_tr_template;
@@ -220,7 +220,7 @@ public:
         double sum_tx{0}, sum_ty{0}, sum_rot{0}, sum_scale{1};
 
         while (!input_port.isStopping()) {
-            ev::info my_info = input_port.readChunkT(0.0001, true);
+            ev::info my_info = input_port.readChunkT(0.001, true);
 //            yInfo()<<my_info.count<<my_info.duration<<my_info.timestamp;
             for (auto &v : input_port) {
 //                if(v.x>roi_around_eros.x && v.x<roi_around_eros.x+roi_around_eros.width && v.y >roi_around_eros.y && v.y<roi_around_eros.y+roi_around_eros.height)
@@ -236,6 +236,19 @@ public:
                 // warp on independent axes the roto-translated template
                 cv::warpAffine(last_template, affine_info[affine].warped_img, affine_info[affine].A,
                                affine_info[affine].warped_img.size());
+
+                if(affine == 6){
+                    double n_white_pix_initial_template = cv::countNonZero(initial_template);
+                    double sum_intensities_initial_template = 255*n_white_pix_initial_template;
+                    double n_white_pix_rot_template = cv::countNonZero(affine_info[affine].warped_img);
+                    cv::Mat new_rot_template;
+                    cv::threshold(affine_info[affine].warped_img, new_rot_template, 0, 255, THRESH_BINARY);
+                    double scaling_factor = n_white_pix_initial_template/n_white_pix_rot_template;
+//                    yInfo()<<n_white_pix_initial_template<<n_white_pix_rot_template<<sum_intensities_initial_template<<scaling_factor;
+                    cv::Mat scaled_template;
+                    affine_info[affine].warped_img = scaling_factor*new_rot_template;
+                }
+
                 affine_info[affine].score = similarity_score(eros_tracked_64f, affine_info[affine].warped_img);
                 scores_vector.push_back(affine_info[affine].score);
 //                cv::imshow("affine"+std::to_string(affine), affine_info[affine].warped_img);
@@ -245,7 +258,7 @@ public:
             double best_score = *max_element(scores_vector.begin(), scores_vector.end());
 
 //            yInfo() << scores_vector;
-            yInfo() << "highest score =" << best_score_index << best_score;
+//            yInfo() << "highest score =" << best_score_index << best_score;
 
             //update the state
             if (best_score_index == 0)
@@ -265,7 +278,7 @@ public:
             else if (best_score_index == 7)
                 sum_scale = sum_scale*nscale;
 
-            yInfo()<<"Sum ="<<sum_tx<<sum_ty<<sum_rot<<sum_scale;
+//            yInfo()<<"Sum ="<<sum_tx<<sum_ty<<sum_rot<<sum_scale;
 
             //warp the initial template by the affine state only to rotate
 //            cv::Mat rotMat = updateRotMat(sum_rot, 1, cv::Point2f(0,0));
@@ -274,11 +287,6 @@ public:
             cv::warpAffine(initial_template, rot_template, rotMatfunc, rot_template.size());
 //            cv::circle(rot_template, cv::Point(initial_position.x-roi_around_shape.x, initial_position.y-roi_around_shape.y),1,255,1,8,0);
             imshow("template", rot_template);
-
-//            double initial_n_white_pix = cv::countNonZero(initial_template);
-//            double n_white_pix = cv::countNonZero(rot_template);
-//            yInfo()<<n_white_pix;
-//            double scaled_factor = n_white_pix/initial_n_white_pix;
 
 //            if(sum_scale>1 && scaled_factor>1){
 //                cv::Mat scaled_template;
