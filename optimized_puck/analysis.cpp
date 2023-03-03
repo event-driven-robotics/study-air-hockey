@@ -9,8 +9,7 @@ class objectPos: public yarp::os::RFModule
 private:
     int w, h;
     double period{0.1};
-    int buffer{20};
-    int blur{11};
+    int blur{21};
 
     ev::window<ev::AE> input_port;
 
@@ -41,10 +40,11 @@ private:
     } affine_bundle;
 
     std::array<affine_bundle, 9> affine_info;
-    double translation{2}, angle{0.25}, pscale{1.001}, nscale{0.999};
+    double translation{2}, angle{1.0}, pscale{1.01}, nscale{0.99};
+    std::array<double, 4> state;
     std::vector<cv::Mat> affines_vector;
     std::vector<double> scores_vector;
-    cv::Mat initial_template, roi_template, rot_scaled_template, rot_scaled_tr_template, mexican_template;
+    cv::Mat initial_template, roi_template, roi_template_64f, mexican_template, mexican_template_64f;
     cv::Point initial_position;
     cv::Point new_position;
 
@@ -118,7 +118,7 @@ private:
     }
 
     void make_template(const cv::Mat &input, cv::Mat &output) {
-        static cv::Mat canny_img, f, pos_hat, neg_hat;
+        static cv::Mat  pos_hat, neg_hat; //canny_img, f,
         static cv::Size pblur(blur, blur);
         static cv::Size nblur(2*blur-1, 2*blur-1);
         static double minval, maxval;
@@ -127,11 +127,11 @@ private:
         //cv::normalize(input, input, 0, 255, cv::NORM_MINMAX);
         //cv::Sobel(input,
 
-        input.convertTo(canny_img, CV_32F, 0.003921569);
-        cv::Sobel(canny_img, f, CV_32F, 1, 1);
-        f = (cv::max(f, 0.0) + cv::max(-f, 0.0));
-        cv::minMaxLoc(f, &minval, &maxval);
-        cv::threshold(f, f, maxval*0.05, 0, cv::THRESH_TRUNC);
+//        input.convertTo(canny_img, CV_32F, 0.003921569);
+//        cv::Sobel(canny_img, f, CV_32F, 1, 1);
+//        f = (cv::max(f, 0.0) + cv::max(-f, 0.0));
+//        cv::minMaxLoc(f, &minval, &maxval);
+//        cv::threshold(f, f, maxval*0.05, 0, cv::THRESH_TRUNC);
 
         // cv::imshow("temp", f+0.5);
         //f.copyTo(output);
@@ -139,12 +139,38 @@ private:
         // cv::Canny(input, canny_img, canny_thresh, canny_thresh*canny_scale, 3);
         // canny_img.convertTo(f, CV_32F);
 
-        cv::GaussianBlur(f, pos_hat, pblur, 0);
-        cv::GaussianBlur(f, neg_hat, nblur, 0);
+        cv::GaussianBlur(input, pos_hat, pblur, 0);
+        cv::GaussianBlur(input, neg_hat, nblur, 0);
         output = pos_hat - neg_hat;
+
         cv::minMaxLoc(output, &minval, &maxval);
         double scale_factor = 1.0 / (2 * std::max(fabs(minval), fabs(maxval)));
         output *= scale_factor;
+    }
+
+    cv::Mat createDynamicTemplate(std::array<double, 4> state){
+
+        cv::Mat rot_scaled_template, rot_scaled_tr_template;
+
+        cv::Mat rotMatfunc = getRotationMatrix2D(initial_position, state[2], state[3]);
+        cv::warpAffine(initial_template, rot_scaled_template, rotMatfunc, rot_scaled_template.size());
+        cv::Mat trMat =  updateTrMat(state[0], state[1]);
+        cv::warpAffine(rot_scaled_template, rot_scaled_tr_template, trMat, rot_scaled_tr_template.size());
+        new_position = cv::Point2d(initial_position.x+state[0],initial_position.y+state[1]);
+
+        return rot_scaled_tr_template;
+    }
+
+    void setROI(cv::Mat full_template, int buffer = 20){
+
+        roi_around_shape = cv::boundingRect(full_template);
+        roi_around_shape.x -= buffer;
+        roi_around_shape.y -= buffer;
+        roi_around_shape.width += buffer * 2;
+        roi_around_shape.height += buffer * 2;
+
+        roi_template = full_template(roi_around_shape);
+        roi_template.convertTo(roi_template_64f, CV_64F);  // is 6 type CV_64FC1
     }
 
 public:
@@ -171,6 +197,8 @@ public:
 //        yarp::os::Network::connect("/file/leftdvs:o", "/object_position/AE:i", "fast_tcp");
         yarp::os::Network::connect("/atis3/AE:o", "/object_position/AE:i", "fast_tcp");
 
+        state[0]=0; state[1]=0; state[2]=0; state[3]=1;
+
         // CREATE THE B&W TEMPLATE
         black_image = cv::Mat::zeros(h, w, CV_8UC1);
 
@@ -191,12 +219,13 @@ public:
 
         // DRAW A SQUARE
         square = cv::Rect(306,263, 87, 93);
-        cv::rectangle(black_image, square, cv::Scalar(255),4,8,0); // if you draw a rectangle... is not saved in the matrix numbers
+        cv::rectangle(black_image, square, cv::Scalar(255),1,8,0); // if you draw a rectangle... is not saved in the matrix numbers
 
         initial_position.x = square.x + square.width/2;
         initial_position.y = square.y + square.height/2;
 
-        black_image.convertTo(initial_template, CV_64F);
+//        black_image.convertTo(initial_template, CV_32F);
+        initial_template = black_image;
 
         createAffines(translation, initial_position, angle, pscale, nscale);
 
@@ -207,37 +236,33 @@ public:
 
     void fixed_step_loop() {
 
-        double sum_tx{0}, sum_ty{0}, sum_rot{0}, sum_scale{1};
-
         while (!input_port.isStopping()) {
 
             // 1) create 1 dynamic template
-            yInfo()<<"Sum ="<<sum_tx<<sum_ty<<sum_rot<<sum_scale;
-            cv::Mat rotMatfunc = getRotationMatrix2D(initial_position, sum_rot, sum_scale);
-            cv::warpAffine(initial_template, rot_scaled_template, rotMatfunc, rot_scaled_template.size());
-            cv::Mat trMat =  updateTrMat(sum_tx, sum_ty);
-            cv::warpAffine(rot_scaled_template, rot_scaled_tr_template, trMat, rot_scaled_tr_template.size());
-            new_position = cv::Point2d(initial_position.x+sum_tx,initial_position.y+sum_ty);
+//            yInfo()<<"State ="<<state[0]<<state[1]<<state[2]<<state[3];
+            cv::Mat dynamic_template = createDynamicTemplate(state);
 
             // 2) find the roi (getboundingbox function opencv)
-//            roi_around_shape = cv::boundingRect(rot_scaled_tr_template);
-//            roi_around_shape.x -= buffer;
-//            roi_around_shape.y -= buffer;
-//            roi_around_shape.width += buffer * 2;
-//            roi_around_shape.height += buffer * 2;
-//
-//            roi_template = rot_scaled_tr_template(roi_around_shape);
-//            yInfo()<<roi_around_shape.x<<roi_around_shape.y<<roi_around_shape.width<<roi_around_shape.height;
+            setROI(dynamic_template);
+
+            cv::Point2d new_center(roi_around_shape.width/2, roi_around_shape.height/2);
+            affine_info[4].A = cv::getRotationMatrix2D(new_center, angle, 1);
+            affine_info[5].A = cv::getRotationMatrix2D(new_center, -angle, 1);
+
+            affine_info[6].A = cv::getRotationMatrix2D(new_center, 0, pscale);
+            affine_info[7].A = cv::getRotationMatrix2D(new_center, 0, nscale);
 
             // ????? resize needed -> look at 6dof
 
             // 3) mexican hat
-//            make_template(roi_template, mexican_template);
+            make_template(roi_template_64f, mexican_template);
+            mexican_template.convertTo(mexican_template_64f, CV_64F);  // is 6 type CV_64FC1
 
             // 4) create 9 templates (warped images)
             for (int affine = 0; affine < affine_info.size(); affine++) {
 //                yInfo()<<roi_template.cols<<roi_template.rows<<affine_info[affine].warped_img.cols<<affine_info[affine].warped_img.rows;
-                cv::warpAffine(rot_scaled_tr_template, affine_info[affine].warped_img, affine_info[affine].A, affine_info[affine].warped_img.size());
+//                cv::warpAffine(roi_template_64f, affine_info[affine].warped_img, affine_info[affine].A, roi_template_64f.size());
+                cv::warpAffine(mexican_template_64f, affine_info[affine].warped_img, affine_info[affine].A, mexican_template_64f.size());
             }
 
             // 5) get EROS ROI
@@ -247,51 +272,53 @@ public:
             }
             cv::GaussianBlur(eros.getSurface(), eros_filtered, cv::Size(5, 5), 0);
 //            yInfo()<<roi_around_shape.x<<roi_around_shape.y<<roi_around_shape.width<<roi_around_shape.height;
-//            eros_filtered(roi_around_shape).copyTo(eros_tracked); // is 0 type CV_8UC1
-            eros_filtered.convertTo(eros_tracked_64f, CV_64F);  // is 6 type CV_64FC1
+            eros_filtered(roi_around_shape).copyTo(eros_tracked); // is 0 type CV_8UC1
+            eros_tracked.convertTo(eros_tracked_64f, CV_64F);  // is 6 type CV_64FC1
 
             // 6) compare 9 templates vs eros
             for (int affine = 0; affine < affine_info.size(); affine++) {
-//                yInfo()<<eros_tracked.type()<<affine_info[affine].warped_img.type();
-//                yInfo()<<eros_tracked.cols<<eros_tracked.rows<<affine_info[affine].warped_img.cols<<affine_info[affine].warped_img.rows;
+//                yInfo()<<eros_tracked_64f.type()<<affine_info[affine].warped_img.type();
+//                yInfo()<<eros_tracked_64f.cols<<eros_tracked_64f.rows<<affine_info[affine].warped_img.cols<<affine_info[affine].warped_img.rows;
                 affine_info[affine].score = similarity_score(eros_tracked_64f, affine_info[affine].warped_img);
                 scores_vector.push_back(affine_info[affine].score);
-                //cv::imshow("affine"+std::to_string(affine), affine_info[affine].warped_img);
+                cv::imshow("affine"+std::to_string(affine), affine_info[affine].warped_img);
             }
 
             // 7) get the maximum score
             int best_score_index = max_element(scores_vector.begin(), scores_vector.end()) - scores_vector.begin();
             double best_score = *max_element(scores_vector.begin(), scores_vector.end());
             //yInfo() << scores_vector;
-            yInfo() << "highest score =" << best_score_index << best_score;
+//            yInfo() << "highest score =" << best_score_index << best_score;
             scores_vector.clear();
 
             // 8) update the state
             if (best_score_index == 0)
-                sum_tx += translation;
+                state[0] += translation;
             else if (best_score_index == 1)
-                sum_tx -= translation;
+                state[0] -= translation;
             else if (best_score_index == 2)
-                sum_ty += translation;
+                state[1] += translation;
             else if (best_score_index == 3)
-                sum_ty -= translation;
+                state[1] -= translation;
             else if (best_score_index == 4)
-                sum_rot += angle;
+                state[2] += angle;
             else if (best_score_index == 5)
-                sum_rot -= angle;
+                state[2] -= angle;
             else if (best_score_index == 6)
-                sum_scale = sum_scale*pscale;
+                state[3] = state[3]*pscale;
             else if (best_score_index == 7)
-                sum_scale = sum_scale*nscale;
+                state[3] = state[3]*nscale;
 
             // 9) visualize
-//            imshow("TEMPLATE ROI", roi_template);
-//            imshow("MEXICAN HAT", mexican_template);
-//            imshow("EROS ROI", eros_tracked);
+            cv::Mat norm_mexican;
+            cv::normalize(mexican_template_64f, norm_mexican, 1, 0, cv::NORM_MINMAX);
+            imshow("MEXICAN ROI", mexican_template_64f+0.5);
+            imshow("TEMPLATE ROI", roi_template);
+            imshow("EROS ROI", eros_tracked);
             cv::circle(eros_filtered, new_position, 2, 255, -1);
             cv::rectangle(eros_filtered, roi_around_shape, 255,1,8,0);
-            imshow("EROS FULL", eros_filtered);
-            imshow("TEMPLATE FULL", rot_scaled_tr_template);
+            imshow("EROS FULL", eros_filtered+dynamic_template);
+//            imshow("TEMPLATE FULL", dynamic_template);
             cv::waitKey(1);
 
         }
