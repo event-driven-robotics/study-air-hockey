@@ -2,44 +2,25 @@
 cmake_minimum_required(VERSION 3.5)
 
 # produce the cmake var PROJECT_NAME
-project(puck_position)
-
-file(GLOB source src/*.cpp)
-file(GLOB header include/*.h)
+project(eye-tracking)
 
 find_package(YCM REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(YARP COMPONENTS OS sig math dev REQUIRED)
+find_package(YARP COMPONENTS os sig REQUIRED)
 find_package(event-driven REQUIRED)
-find_package(hpe-core REQUIRED)
 
-include(GNUInstallDirs)
-if(NOT CMAKE_CONFIGURATION_TYPES)
-    if(NOT CMAKE_BUILD_TYPE)
-        message(STATUS "Setting build type to 'Release' as none was specified.")
-        set_property(CACHE CMAKE_BUILD_TYPE PROPERTY VALUE "Release")
-    endif()
-endif()
+add_executable(${PROJECT_NAME} src/eye_tracking.cpp include/eye_tracking.h)
 
-include(AddInstallRPATHSupport)
-add_install_rpath_support(BIN_DIRS "${CMAKE_INSTALL_FULL_BINDIR}"
-        LIB_DIRS "${CMAKE_INSTALL_FULL_LIBDIR}"
-        INSTALL_NAME_DIR "${CMAKE_INSTALL_FULL_LIBDIR}"
-        USE_LINK_PATH)
+# find_package(Threads REQUIRED)
+# target_link_libraries(test Threads::Threads)
 
-add_executable(${PROJECT_NAME} ${source} ${header})
-
-target_link_libraries(${PROJECT_NAME} PRIVATE YARP::YARP_OS
+target_link_libraries(${PROJECT_NAME} PRIVATE YARP::YARP_os
         YARP::YARP_init
         YARP::YARP_sig
-        YARP::YARP_dev
-        YARP::YARP_math
         ev::event-driven
-        hpe-core::hpe-core
         ${OpenCV_LIBRARIES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
-#file(GLOB scripts ${CMAKE_SOURCE_DIR}/app/scripts/app_vAirHockeyDemo.xml)
-#yarp_install(FILES ${scripts} DESTINATION ${EVENT-DRIVEN_APPLICATIONS_INSTALL_DIR})
+
