@@ -42,7 +42,8 @@
 #include <opencv2/calib3d.hpp>
 #include <opencv2/calib3d/calib3d_c.h>
 
-#include "hpe-core/representations.h"
+#include <event-driven/algs.h>
+#include <event-driven/vis.h>
 
 using namespace ev;
 using namespace cv;
@@ -101,6 +102,7 @@ public:
 
         filter = createEllipse(filter_width);
 
+        yInfo()<<"ellipse created";
 //        double fw2 = (double)filter_width/2.0;
 //        filter = cv::Mat(filter_width, filter_width, CV_32F);
 //
@@ -123,8 +125,8 @@ public:
 //        cv::Mat temp;
 //        cv::normalize(filter, temp, 1, 0, cv::NORM_MINMAX);
 
-//        cv::imshow("init filter", filter);
-//        cv::waitKey(1);
+    //    cv::imwrite("/home/luna/Downloads/init_filter.png", filter);
+    //    cv::waitKey(1);
 
     }
 
@@ -143,27 +145,29 @@ public:
 //        peak_conv_bottle.addDouble(max);
 //        peakPort.write();
 
-//        cv::normalize(result_convolution, result_conv_normalized, 255, 0, cv::NORM_MINMAX);
-//        result_conv_normalized.convertTo(result_visualization, CV_8U);
-//
-//        cv::cvtColor(result_visualization, result_color, cv::COLOR_GRAY2BGR);
-//        if (max>thresh)
-//            cv::circle(result_color, max_loc, 5, cv::Scalar(255, 0, 0), cv::FILLED);
-//        else
-//            cv::circle(result_color, max_loc, 5, cv::Scalar(0, 0, 255), cv::FILLED);
-//
-//        cv::imshow("DETECT_MAP", eros(roi));
-//
-//        result_convolution.at<float>(0,0) = 4000;
-//        cv::normalize(result_convolution, heat_map, 0, 255, cv::NORM_MINMAX);
-//        heat_map.convertTo(heat_map, CV_8U);
-//
-//        cv::applyColorMap(heat_map, result_final, cv::COLORMAP_JET);
-//
-//        cv::imshow("DETECT_HEAT_MAP", result_final);
-//        cv::waitKey(1);
+    //    cv::normalize(result_convolution, result_conv_normalized, 255, 0, cv::NORM_MINMAX);
+    //    result_conv_normalized.convertTo(result_visualization, CV_8U);
+
+    //    cv::cvtColor(result_visualization, result_color, cv::COLOR_GRAY2BGR);
+    //    if (max>thresh)
+    //        cv::circle(result_color, max_loc, 5, cv::Scalar(255, 0, 0), cv::FILLED);
+    //    else
+    //        cv::circle(result_color, max_loc, 5, cv::Scalar(0, 0, 255), cv::FILLED);
+
+    //    cv::imshow("DETECT_MAP", eros(roi));
+
+    //    result_convolution.at<float>(0,0) = 4000;
+    //    cv::normalize(result_convolution, heat_map, 0, 255, cv::NORM_MINMAX);
+    //    heat_map.convertTo(heat_map, CV_8U);
+
+    //    cv::applyColorMap(heat_map, result_final, cv::COLORMAP_JET);
+
+    //    cv::imshow("DETECT_HEAT_MAP", result_final);
+    //    cv::waitKey(1);
 
         max_loc += cv::Point(roi.x, roi.y);
+
+        // yInfo()<<max; 
 
         return max>thresh;
     }
@@ -283,9 +287,9 @@ private:
         cv::rectangle(H, zoom, cv::Scalar(255, 0, 255));
         cv::rectangle(H, zoom2, cv::Scalar(255, 0, 255));
 
-        cv::imshow("ROI TRACK", H);
-        cv::imshow("ZOOM", result_final(zoom));
-        cv::imshow("GAUSSIAN MUL", result_final_filtered);
+        // cv::imshow("ROI TRACK", H);
+        // cv::imshow("ZOOM", result_final(zoom));
+        // cv::imshow("GAUSSIAN MUL", result_final_filtered);
 
 //        cv::waitKey(1);
 
@@ -311,8 +315,8 @@ private:
 //        cv::cvtColor(vis_ellipse,color_ellipse, cv::COLOR_GRAY2BGR);
 //        cv::imshow("ell_filter", color_ellipse);
 
-//        cv::imshow("ell_filter",filter_set[make_pair(width,height)]);
-//        cv::waitKey(1);
+    //    cv::imshow("ell_filter",filter_set[make_pair(width,height)]);
+    //    cv::waitKey(1);
 
         if(p.s > 0){
             best = p;
@@ -594,7 +598,7 @@ private:
     int n_trial, n_exp;
     std::mutex m, m2;
     int w, h;
-    hpecore::surface EROS_vis;
+    ev::EROS EROS_vis;
     double start_time_latency;
     int save,seq;
 

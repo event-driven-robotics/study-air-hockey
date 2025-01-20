@@ -11,7 +11,6 @@ find_package(YCM REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(YARP COMPONENTS OS sig math dev REQUIRED)
 find_package(event-driven REQUIRED)
-find_package(hpe-core REQUIRED)
 
 include(GNUInstallDirs)
 if(NOT CMAKE_CONFIGURATION_TYPES)
@@ -35,7 +34,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE YARP::YARP_OS
         YARP::YARP_dev
         YARP::YARP_math
         ev::event-driven
-        hpe-core::hpe-core
         ${OpenCV_LIBRARIES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/include)

@@ -27,10 +27,10 @@ using namespace std;
 bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
 
     // options and parameters
-    w = rf.check("w", Value(640)).asInt();
-    h = rf.check("h", Value(480)).asInt();
-    n_trial = rf.check("n_trial", Value(1)).asInt();
-    n_exp = rf.check("n_exp", Value(1)).asInt();
+    w = rf.check("w", Value(640)).asInt32();
+    h = rf.check("h", Value(480)).asInt32();
+    n_trial = rf.check("n_trial", Value(1)).asInt8();
+    n_exp = rf.check("n_exp", Value(1)).asInt8();
 
     // module name
     setName((rf.check("name", Value("/puck_position")).asString()).c_str());
@@ -49,7 +49,7 @@ bool puckPosModule::configure(yarp::os::ResourceFinder& rf) {
     yarp::os::Network::connect("/atis3/AE:o", getName("/AE:i"), "fast_tcp");
 
     cv::Mat temp = EROS_vis.getSurface();
-    eros_thread.initialise(temp, 19, cv::Rect(60, 150, 500, 80), 3000, &m2, n_trial, n_exp);
+    eros_thread.initialise(temp, 19, cv::Rect(60, 150, 500, 80), 1000, &m2, n_trial, n_exp);
     eros_thread.start();
 
 //    pause = false;
@@ -94,7 +94,7 @@ void puckPosModule::run() {
     double time_offset = -1.0;
     ev::info read_stats = input_port.readChunkN(1);
     if(input_port.isStopping()) return;
-    time_offset = input_port.begin().packetTime();
+    // time_offset = input_port.begin().packetTime();
     eros_thread.setFirstTime(time_offset);
 
     while (Thread::isRunning()) {
@@ -103,14 +103,18 @@ void puckPosModule::run() {
         if(input_port.isStopping())
             break;
         for(auto a = input_port.begin(); a != input_port.end(); a++) {
-            EROS_vis.EROSupdate((*a).x, (*a).y);
 
-            yarp::sig::PixelBgr &ePix = puckMap.pixel((*a).x,(*a).y);
-            ePix.r = ePix.b = ePix.g = 255;
+            if ((*a).x>0 && (*a).x < 640 && (*a).y>0 && (*a).y < 480){
+                EROS_vis.update((*a).x, (*a).y);
 
-            eros_thread.setCurrentTime(a.packetTime());
+                yarp::sig::PixelBgr &ePix = puckMap.pixel((*a).x,(*a).y);
+                ePix.r = ePix.b = ePix.g = 255;
+            }
+
+
+            // eros_thread.setCurrentTime(a.packetTime());
         }
-        eros_thread.setLatencyTime(input_port.getUnprocessedDelay());
+        // eros_thread.setLatencyTime(input_port.getUnprocessedDelay());
 
 
 
